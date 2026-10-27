@@ -589,7 +589,9 @@ static void registerValidity(bool reregister, bool hashGiven, bool canonicalise)
         auto info = decodeValidPathInfo(*store, cin, hashResultOpt);
         if (!info)
             break;
-        if (!store->isValidPath(info->path) || reregister) {
+        /* NB: when reregistering, skip the validity check: its result is
+           discarded and it costs a SELECT per path. */
+        if (reregister || !store->isValidPath(info->path)) {
             /* !!! races */
             if (canonicalise)
                 canonicalisePathMetaData(

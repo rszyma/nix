@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <map>
 
 #include <memory>
 #include <new>
@@ -908,43 +909,112 @@ void LocalStore::registerValidPaths(const ValidPathInfos & infos)
         auto state(_state->lock());
 
         SQLiteTxn txn(state->db);
+
+        /* Resolve path ids with a single query instead of one SELECT
+           per path and per reference edge. */
+        std::map<std::string, uint64_t> ids;
+        {
+            SQLiteStmt queryIds;
+            queryIds.create(state->db, "select id, path from ValidPaths;");
+            auto useIds = queryIds.use();
+            while (useIds.next())
+                ids.emplace(useIds.getStr(1), useIds.getInt(0));
+        }
         StorePathSet paths;
 
         for (auto & [_, i] : infos) {
             assert(i.narHash.algo == HashAlgorithm::SHA256);
-            if (isValidPath_(*state, i.path))
-                updatePathInfo(*state, i);
+            auto [it, inserted] = ids.try_emplace(printStorePath(i.path), 0);
+            if (inserted)
+                it->second = addValidPath(*state, i);
             else
-                addValidPath(*state, i);
+                updatePathInfo(*state, i);
             paths.insert(i.path);
         }
 
+        /* Insert references in chunks with a single multi-row INSERT
+           each, instead of one statement execution per edge. */
+        std::string values;
+        size_t pendingRefs = 0;
+        constexpr size_t refsChunkSize = 500;
         for (auto & [_, i] : infos) {
-            auto referrer = queryValidPathId(*state, i.path);
-            for (auto & j : i.references)
-                state->stmts->AddReference.use()(referrer)(queryValidPathId(*state, j)).exec();
+            auto referrer = ids[printStorePath(i.path)];
+            std::string referrerStr = std::to_string(referrer);
+            for (auto & j : i.references) {
+                /* Unknown references still go through queryValidPathId
+                   so they throw InvalidPath as before. */
+                auto reference = ids.find(printStorePath(j));
+                uint64_t refId =
+                    reference != ids.end() ? reference->second : queryValidPathId(*state, j);
+                values += values.empty() ? "(" : ",(";
+                values += referrerStr;
+                values += ',';
+                values += std::to_string(refId);
+                values += ')';
+                if (++pendingRefs == refsChunkSize) {
+                    state->db.exec("insert or replace into Refs(referrer, reference) values " + values);
+                    values.clear();
+                    pendingRefs = 0;
+                }
+            }
         }
+        if (pendingRefs)
+            state->db.exec("insert or replace into Refs(referrer, reference) values " + values);
 
-        /* Do a topological sort of the paths.  This will throw an
-           error if a cycle is detected and roll back the
-           transaction.  Cycles can only occur when a derivation
-           has multiple outputs. */
-        auto topoSortResult = topoSort(paths, [&](const StorePath & path) {
-            auto i = infos.find(path);
-            return i == infos.end() ? StorePathSet() : i->second.references;
-        });
-
-        std::visit(
-            overloaded{
-                [&](const Cycle<StorePath> & cycle) {
-                    throw BuildError(
-                        BuildResult::Failure::OutputRejected,
-                        "cycle detected in the references of '%s' from '%s'",
-                        printStorePath(cycle.path),
-                        printStorePath(cycle.parent));
-                },
-                [](auto &) { /* Success, continue */ }},
-            topoSortResult);
+        /* Detect reference cycles with an explicit index-based DFS:
+           same cycle semantics as topoSort(), but O(V+E) array
+           accesses instead of ordered-set lookups per edge. The
+           resulting order is unused; only cycles matter here. */
+        std::vector<StorePath> order(paths.begin(), paths.end());
+        std::map<StorePath, size_t> index;
+        for (size_t k = 0; k != order.size(); ++k)
+            index.emplace(order[k], k);
+        std::vector<std::vector<size_t>> children(order.size());
+        for (size_t k = 0; k != order.size(); ++k) {
+            auto it = infos.find(order[k]);
+            if (it == infos.end())
+                continue;
+            for (auto & r : it->second.references) {
+                if (r == order[k])
+                    continue;
+                auto jt = index.find(r);
+                if (jt != index.end())
+                    children[k].push_back(jt->second);
+            }
+        }
+        std::vector<char> color(order.size(), 0);
+        struct Frame
+        {
+            size_t node;
+            size_t child;
+        };
+        std::vector<Frame> stack;
+        stack.reserve(order.size());
+        for (size_t root = 0; root != order.size(); ++root) {
+            if (color[root])
+                continue;
+            color[root] = 1;
+            stack.push_back({root, 0});
+            while (!stack.empty()) {
+                auto & frame = stack.back();
+                if (frame.child < children[frame.node].size()) {
+                    size_t c = children[frame.node][frame.child++];
+                    if (color[c] == 1)
+                        throw BuildError(
+                            BuildResult::Failure::OutputRejected,
+                            "cycle detected in the references of '%s' from '%s'",
+                            printStorePath(order[c]),
+                            printStorePath(order[frame.node]));
+                    if (!color[c]) {
+                        color[c] = 1;
+                        stack.push_back({c, 0});
+                    }
+                } else {
+                    color[frame.node] = 2;
+                    stack.pop_back();
+                }
+            }
+        }
 
         txn.commit();
     });

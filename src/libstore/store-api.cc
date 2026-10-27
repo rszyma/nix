@@ -1145,6 +1145,18 @@ void copyClosure(
     copyPaths(srcStore, dstStore, closure, repair, checkSigs, substitute);
 }
 
+/* Bulk-import input is machine-generated, so paths are canonical and
+   a prefix strip suffices; StorePath construction still validates.
+   (Upstream factored this out as parseStorePathCanonical.) */
+static StorePath parseCanonicalPath(const Store & store, std::string_view path)
+{
+    if (path.size() <= store.storeDir.size()
+        || path.substr(0, store.storeDir.size()) != store.storeDir
+        || path[store.storeDir.size()] != '/')
+        throw Error("path '%s' is not in the Nix store", std::string(path));
+    return StorePath(path.substr(store.storeDir.size() + 1));
+}
+
 std::optional<ValidPathInfo>
 decodeValidPathInfo(const Store & store, std::istream & str, std::optional<HashResult> hashGiven)
 {
@@ -1163,12 +1175,12 @@ decodeValidPathInfo(const Store & store, std::istream & str, std::optional<HashR
             throw Error("number expected");
         hashGiven = {narHash, *narSize};
     }
-    ValidPathInfo info(store.parseStorePath(path), {store, hashGiven->hash});
+    ValidPathInfo info(parseCanonicalPath(store, path), {store, hashGiven->hash});
     info.narSize = hashGiven->numBytesDigested;
     std::string deriver;
     getline(str, deriver);
     if (deriver != "")
-        info.deriver = store.parseStorePath(deriver);
+        info.deriver = parseCanonicalPath(store, deriver);
     std::string s;
     getline(str, s);
     auto n = string2Int<int>(s);
@@ -1176,7 +1188,7 @@ decodeValidPathInfo(const Store & store, std::istream & str, std::optional<HashR
         throw Error("number expected");
     while ((*n)--) {
         getline(str, s);
-        info.references.insert(store.parseStorePath(s));
+        info.references.insert(parseCanonicalPath(store, s));
     }
     if (!str || str.eof())
         throw Error("missing input");
