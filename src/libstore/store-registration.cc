@@ -138,10 +138,17 @@ std::list<ref<Store>> getDefaultSubstituters()
         ThreadPool pool{refs.size()};
         for (size_t i = 0; i < refs.size(); ++i)
             pool.enqueue([&storeSlot = opened[i], &storeRef = refs[i]]() {
+                std::shared_ptr<StoreConfig> config;
                 try {
-                    storeSlot = openStore(StoreReference{storeRef}).get_ptr();
+                    config = resolveStoreConfig(StoreReference{storeRef}).get_ptr();
+                    auto store = config->openStore();
+                    store->init();
+                    storeSlot = store.get_ptr();
                 } catch (Error & e) {
-                    logWarning(e.info());
+                    if (config && config->optional)
+                        logOptionalSubstituterError(*config, e);
+                    else
+                        logWarning(e.info());
                 }
             });
         pool.process();

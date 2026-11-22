@@ -34,8 +34,12 @@ Goal::Co<Goal::ExitCode> DrvOutputSubstitutionGoal::init()
             outputInfo = co_await AsyncCallback<std::shared_ptr<const UnkeyedRealisation>>(
                 [sub, id = this->id](auto cb) { sub->queryRealisation(id, std::move(cb)); });
         } catch (std::exception & e) {
-            printError(e.what());
-            substituterFailed = true;
+            if (sub->config.optional)
+                logOptionalSubstituterError(sub->config, e);
+            else {
+                printError(e.what());
+                substituterFailed = true;
+            }
         }
 
         if (!outputInfo)

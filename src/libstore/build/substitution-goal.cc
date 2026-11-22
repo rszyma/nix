@@ -89,7 +89,10 @@ Goal::Co<PathSubstitutionGoal::Result> PathSubstitutionGoal::substitute()
         } catch (InvalidPath &) {
             continue;
         } catch (Error & e) {
-            lastStoresException = std::make_optional(std::move(e));
+            if (sub->config.optional)
+                logOptionalSubstituterError(sub->config, e);
+            else
+                lastStoresException = std::make_optional(std::move(e));
             continue;
         }
 
@@ -161,7 +164,8 @@ Goal::Co<PathSubstitutionGoal::Result> PathSubstitutionGoal::substitute()
                 BuildResult{.inner = BuildResult::Success{.status = BuildResult::Success::Substituted}},
             };
 
-        substituterFailed = substituterFailed || (res == SubstitutionResult::SubstituterFailed);
+        if (res == SubstitutionResult::SubstituterFailed && !sub->config.optional)
+            substituterFailed = true;
     }
 
     /* None left.  Terminate this goal and let someone else deal
@@ -293,7 +297,10 @@ PathSubstitutionGoal::tryToRun(StorePath subPath, nix::ref<Store> sub, std::shar
             logWarning({.msg = sg.info().msg});
             co_return SubstitutionResult::SubstituteGone;
         } catch (...) {
-            printError(e.what());
+            if (sub->config.optional)
+                logOptionalSubstituterError(sub->config, e);
+            else
+                printError(e.what());
             co_return SubstitutionResult::SubstituterFailed;
         }
 

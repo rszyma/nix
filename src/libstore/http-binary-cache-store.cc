@@ -147,7 +147,13 @@ void HttpBinaryCacheStore::disable(const Error & cause)
     if (state->disabled)
         return;
     int t = 60;
-    printError("disabling binary cache '%s' for %s seconds", config->getHumanReadableURI(), t);
+    if (config->optional)
+        logOptionalSubstituterError(
+            *config,
+            cause,
+            fmt("disabling optional substituter '%s' for %d seconds", config->getHumanReadableURI(), t));
+    else
+        printError("disabling binary cache '%s' for %s seconds", config->getHumanReadableURI(), t);
     /* Take a copy of the error to attach the note to, so that the original,
        which the caller is about to rethrow, is left alone. `throwClone` is
        the only way to copy an `Error` without slicing it. */

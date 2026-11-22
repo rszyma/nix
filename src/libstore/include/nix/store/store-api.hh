@@ -305,6 +305,19 @@ public:
           A lower value means a higher priority.
         )"};
 
+    Setting<bool> optional{
+        this,
+        false,
+        "optional",
+        R"(
+          Whether this store may be unavailable when used as a [substituter](@docroot@/command-ref/conf-file.md#conf-substituters).
+
+          If `true`, any error from this store, such as an unreachable host or a failed download, is treated as if the store does not have the path.
+          Nix moves on to the next substituter, or builds the path if no substituter has it.
+
+          If `false`, such an error can make the build fail unless [`fallback`](@docroot@/command-ref/conf-file.md#conf-fallback) is enabled.
+        )"};
+
     Setting<bool> wantMassQuery{
         this,
         false,
@@ -1096,6 +1109,17 @@ void copyClosure(
  * as a (permanent) root.
  */
 void removeTempRoots();
+
+/**
+ * Log an error from an optional substituter (see `StoreConfig::optional`).
+ *
+ * Only the first error of each substituter is shown, as a one-line notice, so that an unavailable
+ * substituter is not reported once per path. Every error goes to the debug log in full.
+ *
+ * @param summary Replaces the start of the notice, e.g. to say that the substituter is disabled.
+ */
+void logOptionalSubstituterError(
+    const StoreConfig & config, const std::exception & e, std::optional<std::string> summary = std::nullopt);
 
 /**
  * Resolve the derived path completely, failing if any derivation output

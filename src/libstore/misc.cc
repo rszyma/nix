@@ -144,7 +144,10 @@ querySubstitutablePathInfosAsync(Store & store, const StorePathCAMap & paths, Su
                 break; /* We are done. */
             } catch (InvalidPath &) {
             } catch (Error & e) {
-                lastStoresException = std::make_optional(std::move(e));
+                if (sub->config.optional)
+                    logOptionalSubstituterError(sub->config, e);
+                else
+                    lastStoresException = std::make_optional(std::move(e));
             }
         }
         if (lastStoresException.has_value()) {
@@ -253,9 +256,12 @@ MissingPaths Store::queryMissing(const std::vector<DerivedPath> & targets)
                                 try {
                                     realisation = sub->queryRealisation({drvPath, outputName});
                                 } catch (Error & e) {
-                                    if (!settings.getWorkerSettings().tryFallback)
+                                    if (sub->config.optional)
+                                        logOptionalSubstituterError(sub->config, e);
+                                    else if (settings.getWorkerSettings().tryFallback)
+                                        logError(e.info());
+                                    else
                                         throw;
-                                    logError(e.info());
                                 }
                                 if (!realisation)
                                     continue;

@@ -1293,6 +1293,28 @@ void Store::signRealisation(Realisation & realisation)
     }
 }
 
+void logOptionalSubstituterError(
+    const StoreConfig & config, const std::exception & e, std::optional<std::string> summary)
+{
+    static Sync<std::set<std::string>> warned;
+
+    auto * err = dynamic_cast<const Error *>(&e);
+    if (err)
+        logger->logEI(lvlDebug, err->info());
+    else
+        debug("%s", e.what());
+
+    auto uri = config.getHumanReadableURI();
+    if (!warned.lock()->insert(uri).second)
+        return;
+
+    std::string msg = err ? err->info().msg.str() : e.what();
+    notice(
+        "%s: %s",
+        summary.value_or(fmt("ignoring errors from optional substituter '%s'", uri)),
+        msg.substr(0, msg.find('\n')));
+}
+
 const std::filesystem::path & StoreConfig::getStateDir() const
 {
     return settings.nixStateDir;

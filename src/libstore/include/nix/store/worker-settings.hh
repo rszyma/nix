@@ -43,6 +43,9 @@ public:
           If set to `true`, Nix falls back to building from source if a
           binary substitute fails. This is equivalent to the `--fallback`
           flag. The default is `false`.
+
+          This has the same effect as marking every substituter
+          [`optional`](@docroot@/store/types/index.md#store-url-format).
         )",
         {"build-fallback"}};
 
@@ -301,6 +304,9 @@ public:
           Substituters are tried based on their priority value, which each substituter can set independently.
           Lower value means higher priority.
           The default is `https://cache.nixos.org`, which has a priority of 40.
+
+          A substituter that is often unavailable, such as a cache on another machine in the local network, can be marked `optional`, for example `http://192.168.1.2:5000?optional=true`.
+          Errors from an optional substituter do not make the build fail.
 
           At least one of the following conditions must be met for Nix to use a substituter:
 

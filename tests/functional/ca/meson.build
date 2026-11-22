@@ -25,6 +25,7 @@ suites += {
     'repl.sh',
     'selfref-gc.sh',
     'signatures.sh',
+    'substitute-optional.sh',
     'substitute.sh',
     'why-depends.sh',
   ],
